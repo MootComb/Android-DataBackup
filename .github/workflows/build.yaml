@@ -98,16 +98,50 @@ jobs:
       - name: Move APKs
         run: |
           mkdir -p apks
-          find . -name "*.apk" -exec cp -v {} apks/ \;
-          if [ -z "$(ls -A apks/*.apk 2>/dev/null)" ]; then
-            echo "Warning: No APK files found to move"
-          else
-            echo "APK files moved successfully:"
-            ls -la apks/*.apk
-          fi
+          find app/build/outputs/apk -name "*.apk" -exec cp -v {} apks/ \;
+          echo "Found APK files:"
+          ls -la apks/
 
-      - name: Upload APKs
+      - name: Upload APKs as artifacts
         uses: actions/upload-artifact@v4
         with:
           name: APKs
           path: 'apks/*.apk'
+          retention-days: 30
+
+      - name: Generate Release Tag
+        id: release
+        run: |
+          RELEASE_DATE=$(date +'%Y%m%d-%H%M')
+          RELEASE_TAG="build-${RELEASE_DATE}"
+          echo "release_tag=${RELEASE_TAG}" >> $GITHUB_OUTPUT
+          echo "Generated release tag: ${RELEASE_TAG}"
+
+      - name: Create Release and Upload APKs
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ steps.release.outputs.release_tag }}
+          name: "Build ${{ steps.release.outputs.release_tag }}"
+          body: |
+            ## Android DataBackup
+            
+            ### Build information:
+            - **Date**: $(date +'%Y-%m-%d %H:%M:%S')
+            - **Commit**: ${{ github.sha }}
+            - **Branch**: ${{ github.ref_name }}
+            
+            ### APK files:
+            - **Alpha**: Testing version
+            - **Premium**: Full featured version
+            - **FOSS**: Free and open source version
+            
+            ### Architectures:
+            - arm64-v8a (modern devices)
+            - armeabi-v7a (older devices)
+            - x86 (emulators)
+            - x86_64 (emulators)
+          artifacts: 'source/apks/*.apk'
+          artifactContentType: application/vnd.android.package-archive
+          token: ${{ secrets.GITHUB_TOKEN }}
+          draft: false
+          prerelease: false
