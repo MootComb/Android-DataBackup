@@ -56,7 +56,17 @@ jobs:
             STORE_FILE: ${{ secrets.STORE_FILE }}
             ENCODED_STRING: ${{ secrets.STORE_BASE64 }}
         run: |
-          echo $ENCODED_STRING | base64 -di > "app/${STORE_FILE}"
+          if [ -z "${STORE_FILE}" ] || [ -z "${ENCODED_STRING}" ]; then
+            echo "Error: STORE_FILE or ENCODED_STRING is empty"
+            exit 1
+          fi
+          mkdir -p app
+          echo "${ENCODED_STRING}" | base64 -di > "app/${STORE_FILE}"
+          if [ ! -f "app/${STORE_FILE}" ]; then
+            echo "Error: Failed to create keystore file"
+            exit 1
+          fi
+          echo "Keystore file created successfully"
 
       - name: Build with gradle
         id: gradle
@@ -70,24 +80,31 @@ jobs:
           BUILD_FOSS: ${{ github.event.inputs.Foss }}
         run: |
           TASKS=""
-          if [ ${BUILD_ALPHA} = 'true' ]; then
+          if [ "${BUILD_ALPHA}" = 'true' ]; then
             TASKS="$TASKS assembleArm64-v8aAlphaRelease assembleArmeabi-v7aAlphaRelease assembleX86AlphaRelease assembleX86_64AlphaRelease"
           fi
-          if [ ${BUILD_PREMIUM} = 'true' ]; then
+          if [ "${BUILD_PREMIUM}" = 'true' ]; then
             TASKS="$TASKS assembleArm64-v8aPremiumRelease assembleArmeabi-v7aPremiumRelease assembleX86PremiumRelease assembleX86_64PremiumRelease"
           fi
-          if [ ${BUILD_FOSS} = 'true' ]; then
+          if [ "${BUILD_FOSS}" = 'true' ]; then
             TASKS="$TASKS assembleArm64-v8aFossRelease assembleArmeabi-v7aFossRelease assembleX86FossRelease assembleX86_64FossRelease"
           fi
-          if [ -z ${TASKS} ]; then
+          if [ -z "${TASKS}" ]; then
             TASKS="assembleRelease"
           fi
-          ./gradlew $TASKS --daemon --parallel
+          echo "Running tasks: ${TASKS}"
+          ./gradlew ${TASKS} --daemon --parallel
 
       - name: Move APKs
         run: |
           mkdir -p ../apks
-          find . -name "*.apk" -exec cp {} ../apks/ \;
+          find . -name "*.apk" -exec cp -v {} ../apks/ \;
+          if [ -z "$(ls -A ../apks/*.apk 2>/dev/null)" ]; then
+            echo "Warning: No APK files found to move"
+          else
+            echo "APK files moved successfully:"
+            ls -la ../apks/*.apk
+          fi
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
