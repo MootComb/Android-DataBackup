@@ -55,7 +55,9 @@ jobs:
         env:
             STORE_FILE: ${{ secrets.STORE_FILE }}
             ENCODED_STRING: ${{ secrets.STORE_BASE64 }}
-        run: echo $ENCODED_STRING | base64 -di > "./app/${STORE_FILE}"
+        run: |
+          mkdir -p app
+          echo $ENCODED_STRING | base64 -di > "app/${STORE_FILE}"
 
       - name: Build with gradle
         id: gradle
@@ -84,10 +86,12 @@ jobs:
           ./gradlew $TASKS --daemon --parallel
 
       - name: Move APKs
-        run: mv ./*/build/outputs/apk/*/release/*.apk .
+        run: |
+          mkdir -p ../apks
+          find . -name "*.apk" -exec cp {} ../apks/ \;
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: APKs
-          path: '**/*.apk'
+          path: '../apks/*.apk'
