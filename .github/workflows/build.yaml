@@ -97,17 +97,17 @@ jobs:
 
       - name: Move APKs
         run: |
-          mkdir -p ../apks
-          find . -name "*.apk" -exec cp -v {} ../apks/ \;
-          if [ -z "$(ls -A ../apks/*.apk 2>/dev/null)" ]; then
+          mkdir -p apks
+          find . -name "*.apk" -exec cp -v {} apks/ \;
+          if [ -z "$(ls -A apks/*.apk 2>/dev/null)" ]; then
             echo "Warning: No APK files found to move"
           else
             echo "APK files moved successfully:"
-            ls -la ../apks/*.apk
+            ls -la apks/*.apk
           fi
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
           name: APKs
-          path: '../apks/*.apk'
+          path: 'apks/*.apk'
