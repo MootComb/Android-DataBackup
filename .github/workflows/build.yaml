@@ -56,7 +56,6 @@ jobs:
             STORE_FILE: ${{ secrets.STORE_FILE }}
             ENCODED_STRING: ${{ secrets.STORE_BASE64 }}
         run: |
-          mkdir -p app
           echo $ENCODED_STRING | base64 -di > "app/${STORE_FILE}"
 
       - name: Build with gradle
