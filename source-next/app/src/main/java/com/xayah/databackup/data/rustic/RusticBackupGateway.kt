@@ -11,6 +11,18 @@ import kotlinx.coroutines.CancellationException
 class RusticBackupGateway {
     private val snapshotListAdapter = Moshi.Builder().build().adapter<List<RusticSnapshot>>()
 
+    suspend fun readSnapshotTextFiles(
+        repositoryPath: String,
+        password: String,
+        snapshotId: String,
+        paths: List<String>,
+    ): Map<String, String> {
+        val serialized = RemoteRootService.readRusticSnapshotTextFiles(repositoryPath, password, snapshotId, paths)
+        return requireNotNull(Moshi.Builder().build().adapter<Map<String, String>>().fromJson(serialized))
+    }
+
+    suspend fun getUsersMap(): Map<Int, String> = RemoteRootService.getUsers().associate { it.id to it.name }
+
     suspend fun exists(path: String): Boolean = RemoteRootService.exists(path)
 
     suspend fun isDirectoryEmpty(path: String): Boolean = RemoteRootService.listFilePaths(path, listFiles = true, listDirs = true).isEmpty()
@@ -56,7 +68,7 @@ class RusticBackupGateway {
     suspend fun createSnapshot(
         repositoryPath: String,
         password: String,
-        sourcePaths: List<String>,
+        sourcePaths: Map<String, String>,
         tags: List<String>,
         onProgress: (Long, Long, Float) -> Unit,
     ): String {
