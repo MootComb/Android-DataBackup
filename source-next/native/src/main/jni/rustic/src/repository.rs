@@ -1,10 +1,11 @@
 use rustic_backend::BackendOptions;
-use rustic_core::repofile::SnapshotFile;
+use rustic_core::repofile::{Node, SnapshotFile};
 use rustic_core::{
     BackupOptions, CheckOptions, ConfigOptions, Credentials, KeyOptions, LocalDestination,
     LsOptions, OpenStatus, Repository, RepositoryBackends, RepositoryOptions, RestoreOptions,
     SnapshotOptions,
 };
+use std::path::{Component, Path};
 
 use crate::Result;
 use crate::mapped_source::{MappedSource, SourceMapping};
@@ -92,7 +93,7 @@ fn create_snapshot_from_repository(
         &source.snapshot_paths(),
     )?;
 
-    Ok(snapshot.id.to_string())
+    Ok(snapshot.id.to_hex().to_string())
 }
 
 /// Restores the selected snapshot to the destination path.
@@ -105,18 +106,117 @@ pub fn restore_snapshot(
     snapshot_id: &str,
     destination_path: &str,
 ) -> Result<()> {
+    restore_snapshot_with_options(
+        repository_path,
+        password,
+        snapshot_id,
+        destination_path,
+        &RestoreOptions::default(),
+    )
+}
+
+pub fn restore_snapshot_with_options(
+    repository_path: &str,
+    password: &str,
+    snapshot_id: &str,
+    destination_path: &str,
+    options: &RestoreOptions,
+) -> Result<()> {
     let repo = open_repository(repository_path, password)?.to_indexed()?;
     let node = repo.node_from_snapshot_path(snapshot_id, |_| true)?;
     let ls_options = LsOptions::default();
     let nodes = repo.ls(&node, &ls_options)?;
     let destination = LocalDestination::new(destination_path, true, !node.is_dir())?;
-    let restore_options = RestoreOptions::default();
-    let restore_plan =
-        repo.prepare_restore(&restore_options, nodes.clone(), &destination, false)?;
+    let restore_plan = repo.prepare_restore(options, nodes.clone(), &destination, false)?;
 
-    repo.restore(restore_plan, &restore_options, nodes, &destination)?;
+    repo.restore(restore_plan, options, nodes, &destination)?;
 
     Ok(())
+}
+
+fn validate_external_node(path: &Path, node: &Node) -> Result<()> {
+    if path
+        .components()
+        .any(|part| !matches!(part, Component::Normal(_) | Component::CurDir))
+    {
+        return Err(format!("Invalid external snapshot path: {}", path.display()).into());
+    }
+    if !node.is_dir() && !node.is_file() {
+        return Err(format!("Unsupported external snapshot entry: {}", path.display()).into());
+    }
+    Ok(())
+}
+
+/// Validates that the selected external-data snapshot is a directory containing
+/// only files and directories with relative paths and no parent traversal.
+/// Call before clearing destination contents.
+pub(crate) fn validate_external_snapshot(
+    repository_path: &str,
+    password: &str,
+    snapshot_id: &str,
+) -> Result<()> {
+    let repo = open_repository(repository_path, password)?.to_indexed()?;
+    let node = repo.node_from_snapshot_path(snapshot_id, |_| true)?;
+    if !node.is_dir() {
+        return Err("External snapshot source is not a directory".into());
+    }
+    for entry in repo.ls(&node, &LsOptions::default())? {
+        let (path, node) = entry?;
+        validate_external_node(&path, &node)?;
+    }
+    Ok(())
+}
+
+/// Restores external-data directory contents without importing source ownership,
+/// modes, extended attributes or hardlink relationships.
+/// The caller must validate the snapshot and prepare the destination before calling,
+/// then repair destination metadata even if this function returns an error.
+pub(crate) fn restore_external_snapshot(
+    repository_path: &str,
+    password: &str,
+    snapshot_id: &str,
+    destination_path: &str,
+) -> Result<()> {
+    let repo = open_repository(repository_path, password)?.to_indexed()?;
+    let node = repo.node_from_snapshot_path(snapshot_id, |_| true)?;
+    if !node.is_dir() {
+        return Err("External snapshot source is not a directory".into());
+    }
+    let nodes = repo.ls(&node, &LsOptions::default())?.map(|entry| {
+        entry.map(|(path, mut node)| {
+            // Storage permissions and security attributes belong to the destination device.
+            // Emulated storage cannot represent hardlinks; materialize each file independently.
+            node.meta.mode = None;
+            node.meta.extended_attributes.clear();
+            node.meta.links = 1;
+            (path, node)
+        })
+    });
+    let options = RestoreOptions::default()
+        .no_ownership(true)
+        .verify_existing(true);
+    let destination = LocalDestination::new(destination_path, true, false)?;
+    let plan = repo.prepare_restore(&options, nodes.clone(), &destination, false)?;
+    repo.restore(plan, &options, nodes, &destination)?;
+    Ok(())
+}
+
+/// Reads the original numeric UID of a snapshot directory.
+pub fn read_snapshot_directory_uid(
+    repository_path: &str,
+    password: &str,
+    snapshot_id: &str,
+) -> Result<i32> {
+    let repo = open_repository(repository_path, password)?.to_indexed()?;
+    let node = repo.node_from_snapshot_path(snapshot_id, |_| true)?;
+    if !node.is_dir() {
+        return Err("Snapshot source is not a directory".into());
+    }
+    Ok(node
+        .meta
+        .uid
+        .ok_or("Snapshot directory has no UID")?
+        .try_into()?)
 }
 
 /// Removes exactly one snapshot and returns the remaining metadata.
