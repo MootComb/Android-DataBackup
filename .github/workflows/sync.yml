@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 env:
-  TARGET_WORKFLOW: 'build.yml'
+  TARGET_WORKFLOW: 'build.yaml'
   TRIGGER_ONLY_ON_CHANGES: 'true'
 
 jobs:
