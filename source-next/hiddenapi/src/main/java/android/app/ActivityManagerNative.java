@@ -16,13 +16,13 @@
 
 package android.app;
 
-import android.content.Context;
-
-/**
- * Common implementation of Context API, which provides the base
- * context object for Activity and other application components.
- */
-public abstract class ContextImpl extends Context {
+public abstract class ActivityManagerNative {
+    /**
+     * Retrieve the system's default/global activity manager.
+     */
+    static public IActivityManager getDefault() {
+        throw new RuntimeException("Stub!");
+    }
 }
 
-// https://cs.android.com/android/platform/superproject/+/android-7.0.0_r1:frameworks/base/core/java/android/app/ContextImpl.java
+// https://cs.android.com/android/platform/superproject/+/android-7.0.0_r1:frameworks/base/core/java/android/app/ActivityManagerNative.java

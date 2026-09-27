@@ -14,15 +14,16 @@
  * limitations under the License.
  */
 
-package android.app;
+package android.content;
 
-import android.content.Context;
+import android.os.IInterface;
 
 /**
- * Common implementation of Context API, which provides the base
- * context object for Activity and other application components.
+ * The ipc interface to talk to a content provider.
+ *
+ * @hide
  */
-public abstract class ContextImpl extends Context {
+public interface IContentProvider extends IInterface {
 }
 
-// https://cs.android.com/android/platform/superproject/+/android-7.0.0_r1:frameworks/base/core/java/android/app/ContextImpl.java
+// https://cs.android.com/android/platform/superproject/+/android-7.0.0_r1:frameworks/base/core/java/android/content/IContentProvider.java

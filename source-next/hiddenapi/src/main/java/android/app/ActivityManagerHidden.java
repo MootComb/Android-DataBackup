@@ -16,6 +16,9 @@
 
 package android.app;
 
+import android.os.Build;
+
+import androidx.annotation.RequiresApi;
 import dev.rikka.tools.refine.RefineAs;
 
 /**
@@ -23,6 +26,14 @@ import dev.rikka.tools.refine.RefineAs;
  */
 @RefineAs(ActivityManager.class)
 public class ActivityManagerHidden {
+    /**
+     * @see <a href="https://cs.android.com/android/platform/superproject/+/android-8.0.0_r1:frameworks/base/core/java/android/app/ActivityManager.java;l=4199">ActivityManager.java</a>
+     */
+    @RequiresApi(Build.VERSION_CODES.O)
+    public static IActivityManager getService() {
+        throw new RuntimeException("Stub!");
+    }
+
     /**
      * Have the system perform a force stop of everything associated with
      * the given application package.  All processes that share its uid
@@ -46,4 +57,4 @@ public class ActivityManagerHidden {
     }
 }
 
-// https://cs.android.com/android/platform/superproject/+/android-7.0.0_r36:frameworks/base/core/java/android/app/ActivityManager.java
+// https://cs.android.com/android/platform/superproject/+/android-7.0.0_r1:frameworks/base/core/java/android/app/ActivityManager.java

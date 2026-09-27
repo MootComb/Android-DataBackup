@@ -2,14 +2,15 @@
 
 package com.xayah.databackup.rootservice
 
-import android.app.ActivityThread
+import android.Manifest
 import android.app.ActivityManagerHidden
-import android.content.pm.ApplicationInfo
-import android.content.pm.ApplicationInfoHidden
+import android.app.ActivityThread
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.ServiceConnection
+import android.content.pm.ApplicationInfo
+import android.content.pm.ApplicationInfoHidden
 import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.content.pm.PackageManagerHidden
@@ -38,8 +39,11 @@ import com.xayah.databackup.parcelables.FilePathParcelable
 import com.xayah.databackup.parcelables.StatFsParcelable
 import com.xayah.databackup.service.restore.InstallApkHelper
 import com.xayah.databackup.service.restore.RestoreApkHelper
-import com.xayah.databackup.service.restore.RestoreInternalDataHelper
+import com.xayah.databackup.service.restore.RestoreCallLogsHelper
+import com.xayah.databackup.service.restore.RestoreContactsHelper
 import com.xayah.databackup.service.restore.RestoreExternalDataHelper
+import com.xayah.databackup.service.restore.RestoreInternalDataHelper
+import com.xayah.databackup.service.restore.RestoreMessagesHelper
 import com.xayah.databackup.service.restore.RestoreNetworksHelper
 import com.xayah.databackup.util.LogHelper
 import com.xayah.databackup.util.NotificationHelper
@@ -401,6 +405,25 @@ object RemoteRootService {
                 LogHelper.e(TAG, "restoreRusticNetworks", "", e)
                 // JSON/parser exceptions may contain credentials and are not all supported by Binder.
                 throw IllegalStateException("Wi-Fi restore failed; some networks may already have been restored")
+            }
+        }
+
+        override fun restoreRusticMessages(
+            repositoryPath: String,
+            password: String,
+            snapshotId: String,
+            messageIds: List<String>,
+        ): List<String> = synchronized(mLock) {
+            runCatching {
+                val identity = clearCallingIdentity()
+                try {
+                    RestoreMessagesHelper(mSystemContext, context.cacheDir).restore(repositoryPath, password, snapshotId, messageIds)
+                } finally {
+                    restoreCallingIdentity(identity)
+                }
+            }.getOrElse { e ->
+                LogHelper.e(TAG, "restoreRusticMessages", "", e)
+                throw IllegalStateException("Messages restore failed; some messages may already be restored")
             }
         }
 
@@ -788,6 +811,104 @@ object RemoteRootService {
     ): List<String> = withContext(Dispatchers.IO) {
         val service = checkNotNull(getService()) { "Root service is unavailable" }
         service.restoreRusticNetworks(repositoryPath, password, snapshotId, networkIds)
+    }
+
+    /**
+     * Restores selected contact records from a Rustic snapshot.
+     *
+     * Imports records as local contacts for the app's current user without overwriting existing contacts.
+     * Requires WRITE_CONTACTS permission. The root service reads the snapshot, and the app writes to Contacts Provider.
+     * Allocates new raw contact and data IDs; source IDs, account/sync metadata and group memberships are not imported.
+     * Skips deleted records and records with no remaining data rows after filtering group memberships and photos.
+     * Repeated selection keys are imported once per call, but repeated calls can create duplicate contacts.
+     * Each contact is inserted in one transaction. Earlier imports are not rolled back if restoration fails.
+     *
+     * @param repositoryPath Path to the Rustic repository on the device.
+     * @param password Password used to access the repository.
+     * @param snapshotId Full 64-character hexadecimal snapshot ID.
+     * @param contactIds Non-empty list of restore inventory keys in the form `contact:<index>`,
+     * where `index` is the zero-based record position in the snapshot, not a source-device contact ID.
+     * @return Distinct inventory keys of skipped records in selection order. Empty if no records were
+     * skipped, or all selected keys if no records contain restorable data.
+     * @throws IllegalArgumentException If the snapshot ID, selection or selected contact backup data is invalid.
+     * @throws IllegalStateException If WRITE_CONTACTS permission is missing, the root service is unavailable,
+     * or contact insertion fails.
+     */
+    suspend fun restoreRusticContacts(
+        repositoryPath: String,
+        password: String,
+        snapshotId: String,
+        contactIds: List<String>,
+    ): List<String> = withContext(Dispatchers.IO) {
+        require(snapshotId.matches(Regex("[0-9a-fA-F]{64}"))) { "A full snapshot ID is required" }
+        require(contactIds.isNotEmpty()) { "No contacts selected" }
+        check(App.application.checkSelfPermission(Manifest.permission.WRITE_CONTACTS) == PackageManager.PERMISSION_GRANTED) {
+            "Contacts restore requires WRITE_CONTACTS permission"
+        }
+        val path = PathHelper.getRusticSnapshotMetadataFilePath(PathHelper.getBackupContactsConfigFileRelativePath())
+        val serialized = readRusticSnapshotTextFiles(repositoryPath, password, snapshotId, listOf(path))
+        RestoreContactsHelper(App.application.contentResolver).restore(serialized, path, contactIds)
+    }
+
+    /**
+     * Restores selected call logs from a Rustic snapshot for the app's current user.
+     *
+     * Requires READ_CALL_LOG and WRITE_CALL_LOG. The root service reads the snapshot, and the app writes to CallLogProvider.
+     * Imports portable fields supported by the target Android version without source IDs or SIM/account associations.
+     * Skips duplicates, voicemail and unsupported call types. Restored calls are marked read.
+     * Earlier imports are not rolled back if restoration fails.
+     *
+     * @param repositoryPath Path to the Rustic repository on the device.
+     * @param password Password used to access the repository.
+     * @param snapshotId Full 64-character hexadecimal snapshot ID.
+     * @param callLogIds Non-empty list of inventory keys in the form `call:<index>`, where `index` is the
+     * zero-based record position in the snapshot, not a source-device call ID.
+     * @return Distinct inventory keys of skipped records in selection order. Empty if none were skipped.
+     * @throws IllegalArgumentException If the snapshot ID, selection or selected call log data is invalid.
+     * @throws IllegalStateException If permissions are missing, the root service is unavailable or restoration fails.
+     */
+    suspend fun restoreRusticCallLogs(
+        repositoryPath: String,
+        password: String,
+        snapshotId: String,
+        callLogIds: List<String>,
+    ): List<String> = withContext(Dispatchers.IO) {
+        require(snapshotId.matches(Regex("[0-9a-fA-F]{64}"))) { "A full snapshot ID is required" }
+        require(callLogIds.isNotEmpty()) { "No call logs selected" }
+        check(listOf(Manifest.permission.READ_CALL_LOG, Manifest.permission.WRITE_CALL_LOG).all {
+            App.application.checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED
+        }) { "Call logs restore requires READ_CALL_LOG and WRITE_CALL_LOG permissions" }
+        val path = PathHelper.getRusticSnapshotMetadataFilePath(PathHelper.getBackupCallLogsConfigFileRelativePath())
+        val serialized = readRusticSnapshotTextFiles(repositoryPath, password, snapshotId, listOf(path))
+        RestoreCallLogsHelper(App.application.contentResolver).restore(serialized, path, callLogIds)
+    }
+
+    /**
+     * Restores selected SMS/MMS records from a Rustic snapshot.
+     *
+     * The root service reads the snapshot and imports received/sent messages through Telephony Provider.
+     * Skips duplicates, unsupported message states and MMS records with missing attachments.
+     * Earlier imports are not rolled back if restoration fails.
+     *
+     * @param repositoryPath Path to the Rustic repository on the device.
+     * @param password Password used to access the repository.
+     * @param snapshotId Full 64-character hexadecimal snapshot ID.
+     * @param messageIds Non-empty list of restore inventory keys in the form `sms:<index>` or `mms:<index>`,
+     * where `index` is the zero-based record position in the snapshot, not a source-device message ID.
+     * @return Distinct inventory keys of skipped records in selection order. Empty if none were skipped.
+     * @throws IllegalArgumentException If the snapshot ID is invalid or the selection is empty.
+     * @throws IllegalStateException If the root service is unavailable or message restoration fails.
+     */
+    suspend fun restoreRusticMessages(
+        repositoryPath: String,
+        password: String,
+        snapshotId: String,
+        messageIds: List<String>,
+    ): List<String> = withContext(Dispatchers.IO) {
+        require(snapshotId.matches(Regex("[0-9a-fA-F]{64}"))) { "A full snapshot ID is required" }
+        require(messageIds.isNotEmpty()) { "No messages selected" }
+        val service = checkNotNull(getService()) { "Root service is unavailable" }
+        service.restoreRusticMessages(repositoryPath, password, snapshotId, messageIds)
     }
 
     /**

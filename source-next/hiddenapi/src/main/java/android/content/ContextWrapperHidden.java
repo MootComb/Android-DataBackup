@@ -14,25 +14,24 @@
  * limitations under the License.
  */
 
-package android.app;
+package android.content;
+
+import dev.rikka.tools.refine.RefineAs;
 
 /**
- * This manages the execution of the main thread in an
- * application process, scheduling and executing activities,
- * broadcasts, and other operations on it as the activity
- * manager requests.
- * <p>
- * {@hide}
+ * Proxying implementation of Context that simply delegates all of its calls to
+ * another Context.  Can be subclassed to modify behavior without changing
+ * the original Context.
  */
-public class ActivityThread {
-    public static ActivityThread systemMain() {
-        throw new RuntimeException("Stub!");
+@RefineAs(ContextWrapper.class)
+public class ContextWrapperHidden extends ContextWrapper {
+    public ContextWrapperHidden(Context base) {
+        super(base);
     }
 
-    public ContextImpl getSystemContext() {
+    public String getOpPackageName() {
         throw new RuntimeException("Stub!");
     }
 }
 
-
-// https://cs.android.com/android/platform/superproject/+/android-7.0.0_r1:frameworks/base/core/java/android/app/ActivityThread.java
+// https://cs.android.com/android/platform/superproject/+/android-7.0.0_r1:frameworks/base/core/java/android/content/ContextWrapper.java

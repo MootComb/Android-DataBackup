@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2006 The Android Open Source Project
+ * Copyright (C) 2016 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,13 +16,6 @@
 
 package android.app;
 
-import android.content.Context;
+parcelable ContentProviderHolder;
 
-/**
- * Common implementation of Context API, which provides the base
- * context object for Activity and other application components.
- */
-public abstract class ContextImpl extends Context {
-}
-
-// https://cs.android.com/android/platform/superproject/+/android-7.0.0_r1:frameworks/base/core/java/android/app/ContextImpl.java
+// https://cs.android.com/android/platform/superproject/+/android-8.0.0_r1:frameworks/base/core/java/android/app/ContentProviderHolder.aidl
