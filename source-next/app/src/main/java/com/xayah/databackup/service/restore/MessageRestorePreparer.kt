@@ -24,6 +24,7 @@ internal object MessageRestorePreparer {
         val sms: Map<String, SmsRecord>,
         val mms: Map<String, MmsRecord>,
         val skippedIds: Set<String>,
+        val failures: Map<String, Exception>,
     )
 
     private val mMoshi = Moshi.Builder().build()
@@ -59,7 +60,7 @@ internal object MessageRestorePreparer {
     val inlineTypes = setOf(ClipDescription.MIMETYPE_TEXT_PLAIN, ClipDescription.MIMETYPE_TEXT_HTML, MessageConstant.APP_SMIL)
 
     /**
-     * Validates selected records before any provider writes. Malformed selected data fails the entire preparation.
+     * Validates selected records before any provider writes. Malformed selected records are returned in [PreparedMessages.failures].
      * Unsent messages, notification/report PDUs and incomplete MMS parts are returned in [PreparedMessages.skippedIds].
      * Attachment paths are validated here; snapshot membership and file contents are checked by the restore helper.
      */
@@ -78,8 +79,9 @@ internal object MessageRestorePreparer {
         val preparedSms = linkedMapOf<String, SmsRecord>()
         val preparedMms = linkedMapOf<String, MmsRecord>()
         val skippedIds = linkedSetOf<String>()
+        val failures = linkedMapOf<String, Exception>()
         selectedIds.forEach { (id, index) ->
-            try {
+            runCatching {
                 if (id.startsWith("sms:")) {
                     val record = prepareSms(requireNotNull(sms.getOrNull(index)) { "Unknown SMS record" })
                     if (record == null) skippedIds.add(id) else preparedSms[id] = record
@@ -87,11 +89,12 @@ internal object MessageRestorePreparer {
                     val record = prepareMms(requireNotNull(mms.getOrNull(index)) { "Unknown MMS record" })
                     if (record == null) skippedIds.add(id) else preparedMms[id] = record
                 }
-            } catch (error: Exception) {
-                throw IllegalArgumentException("Invalid message $id: ${error.message}", error)
+            }.onFailure { error ->
+                if (error !is Exception) throw error
+                failures[id] = error
             }
         }
-        return PreparedMessages(preparedSms, preparedMms, skippedIds)
+        return PreparedMessages(preparedSms, preparedMms, skippedIds, failures)
     }
 
     private fun prepareSms(record: Sms): SmsRecord? {
